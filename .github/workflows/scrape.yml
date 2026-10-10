@@ -9,16 +9,20 @@ name: Collect race charts
       dry_run:
         description: Discover only (requires SCRAPER_ENABLED=true for network access)
         type: boolean
+        required: true
         default: true
       track:
-        description: Track code (blank = all current index tracks)
+        description: Track code for the single-race manual test (for example CD)
         type: string
+        required: true
       date:
-        description: Single card date YYYY-MM-DD (requires track)
+        description: Racing date for the manual test (YYYY-MM-DD)
         type: string
+        required: true
       race:
-        description: Single race number (requires track and date)
+        description: Only this race will be processed (1-99)
         type: string
+        required: true
       listing_url:
         description: Explicit published listing URL (requires track and date)
         type: string
@@ -63,16 +67,71 @@ jobs:
           INPUT_DATE: ${{ inputs.date }}
           INPUT_RACE: ${{ inputs.race }}
           INPUT_LISTING_URL: ${{ inputs.listing_url }}
-          INPUT_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
         shell: bash
         run: |
-          args=()
-          if [[ -n "$INPUT_TRACK" ]]; then args+=(--track "$INPUT_TRACK"); fi
-          if [[ -n "$INPUT_DATE" ]]; then args+=(--date "$INPUT_DATE"); fi
-          if [[ -n "$INPUT_RACE" ]]; then args+=(--race "$INPUT_RACE"); fi
-          if [[ -n "$INPUT_LISTING_URL" ]]; then args+=(--listing-url "$INPUT_LISTING_URL"); fi
-          if [[ "$INPUT_DRY_RUN" == "true" ]]; then args+=(--dry-run); fi
-          python -m equibase_scraper.main "${args[@]}"
+          python - <<'PY'
+          import os
+          import re
+          import subprocess
+          import sys
+          from datetime import date
+
+          from equibase_scraper.discovery import card_from_url
+
+          def manual_arguments() -> list[str]:
+              track = os.environ.get("INPUT_TRACK", "").strip().upper()
+              date_text = os.environ.get("INPUT_DATE", "").strip()
+              race = os.environ.get("INPUT_RACE", "").strip()
+              if not all((track, date_text, race)):
+                  raise ValueError("Manual runs require track, date, and race.")
+              if not re.fullmatch(r"[A-Z0-9]{1,6}", track):
+                  raise ValueError("track must contain 1-6 ASCII letters or digits.")
+              if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", date_text):
+                  raise ValueError("date must use YYYY-MM-DD.")
+              try:
+                  race_date = date.fromisoformat(date_text)
+              except ValueError:
+                  raise ValueError("date must be a valid calendar date.") from None
+              if not re.fullmatch(r"[0-9]{1,2}", race) or not 1 <= int(race) <= 99:
+                  raise ValueError("race must be an integer from 1 to 99.")
+              dry_run = os.environ.get("INPUT_DRY_RUN", "").strip().lower() or "true"
+              if dry_run not in {"true", "false"}:
+                  raise ValueError("dry_run must be true or false.")
+              args = ["--track", track, "--date", date_text, "--race", str(int(race))]
+              listing_url = os.environ.get("INPUT_LISTING_URL", "").strip()
+              if listing_url:
+                  try:
+                      card = card_from_url(listing_url)
+                  except ValueError:
+                      raise ValueError(
+                          "listing_url must be an approved HTTPS Equibase card listing."
+                      ) from None
+                  if card.track.code != track or card.race_date != race_date:
+                      raise ValueError("listing_url must match the requested track and date.")
+                  args.extend(["--listing-url", listing_url])
+              if dry_run == "true":
+                  args.append("--dry-run")
+              return args
+
+          event = os.environ.get("GITHUB_EVENT_NAME")
+          if event == "workflow_dispatch":
+              try:
+                  args = manual_arguments()
+              except ValueError as error:
+                  print(f"::error::Invalid manual inputs: {error}", file=sys.stderr)
+                  raise SystemExit(2)
+          elif event == "schedule":
+              # Scheduled collection retains the normal configured recent-date mode.
+              args = []
+          else:
+              print("::error::Unsupported workflow event.", file=sys.stderr)
+              raise SystemExit(2)
+          result = subprocess.run(
+              [sys.executable, "-m", "equibase_scraper.main", *args], check=False
+          )
+          raise SystemExit(result.returncode)
+          PY
       - name: Action summary
         if: always()
         shell: bash

@@ -18,6 +18,10 @@
   nine horse results checked against source layout, and discovery-only CLI run.
 - Fixed HTTP compressed-response reconstruction; added regression coverage.
 - SQL/PLpgSQL syntax, synthetic/mocked tests, Ruff, and workflow actionlint checks.
+- Controlled Actions manual tests now require validated track/date/race inputs, default
+  to dry-run, and cannot fall back to all-tracks discovery. Optional listing URLs are
+  checked against the target; scheduled recent-date collection and configured safeguards
+  are preserved. Workflow execution tests cover validation failures and exact CLI arguments.
 
 ### Pending validation
 
