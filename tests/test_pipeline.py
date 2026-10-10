@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -44,6 +45,7 @@ def test_full_pipeline_and_unchanged_rerun(tmp_path):
     summary = runner.run(OPTIONS, today=date(2026, 10, 10))
     assert summary.charts_saved == summary.charts_parsed == summary.charts_downloaded == 1
     assert summary.failures == 0
+    assert calls == [CARD, SOURCE.chart_url]
     saved_race, download, path = runner.database.save.call_args.args
     existing = {"id": "chart-id", "content_hash": download.content_hash,
                 "source_url": download.source_url, "storage_path": path,
@@ -103,6 +105,21 @@ def test_dry_run_only_listing_no_files_or_persistence(tmp_path):
     assert summary.charts_downloaded == summary.charts_saved == 0
     assert calls == [CARD]
     assert not list(tmp_path.iterdir())
+    runner.database.existing.assert_not_called()
+    runner.storage.upload.assert_not_called()
+
+
+def test_targeted_dry_run_reports_only_the_requested_race(tmp_path, caplog):
+    runner, calls = pipeline(tmp_path)
+    with caplog.at_level("INFO"):
+        summary = runner.run(replace(OPTIONS, dry_run=True), today=date(2026, 10, 10))
+    actions = [record.getMessage() for record in caplog.records
+               if "Would process" in record.getMessage()]
+    assert len(actions) == 1 and "race=1 " in actions[0]
+    assert summary.mode == "dry-run:single-card"
+    assert summary.tracks_checked == summary.dates_checked == summary.charts_discovered == 1
+    assert summary.charts_downloaded == summary.charts_saved == summary.failures == 0
+    assert calls == [CARD]
     runner.database.existing.assert_not_called()
     runner.storage.upload.assert_not_called()
 

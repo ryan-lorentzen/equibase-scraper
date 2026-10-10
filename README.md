@@ -227,10 +227,35 @@ with timezone `America/New_York` (approximately 6:17 AM/PM Eastern, including DS
 can delay scheduled runs. They execute on the repository's **default branch**; confirm
 the intended stable `main` branch in repository settings.
 
-Manual inputs expose track/date/race/listing URL and **default-true dry-run**. Dry runs obey
-`SCRAPER_ENABLED`; disabled scheduled runs produce no-op summaries. PDFs are neither
-committed nor uploaded as Actions artifacts. Runner files are ephemeral; persistent
-originals belong in private Supabase Storage.
+Manual runs require **track, date, and race**, and **dry-run defaults to true**. The workflow
+validates inputs before launching the CLI: a 1–6-character alphanumeric track code, a real
+calendar date in `YYYY-MM-DD` format, race 1–99, and a true/false dry-run value. Track codes
+are uppercased and surrounding whitespace is trimmed. Empty or invalid targets fail the
+job without invoking the scraper; manual runs never fall back to all-tracks discovery.
+The existing optional listing URL must be an approved HTTPS Equibase card listing matching
+the requested track/date. Scheduled runs ignore manual inputs and invoke the CLI without
+targeting arguments, retaining normal recent-date discovery and configured limits.
+
+For a controlled manual test in the GitHub Actions interface:
+
+1. Select **Collect race charts → Run workflow** and the reviewed branch containing this workflow.
+2. Enter a currently available track code, date, and race number; keep **dry_run checked**.
+3. If that card is absent from the recent index, supply its published listing URL. The CLI's
+   existing last-31-days restriction for explicit remote cards still applies.
+4. Run the workflow and inspect the summary: `dry-run:single-card`, only the selected race
+   reported as an intended action, and zero downloads/uploads/database writes.
+
+`SCRAPER_ENABLED` is never automatically enabled, even when dry-run is unchecked. With
+`SCRAPER_ENABLED=false`, a valid manual test is a logged no-op. Network discovery requires
+that setting to be explicitly enabled under the project's approval rules; enabling the
+repository variable also permits scheduled collection, so coordinate that change with
+approval for unattended runs. Unchecking dry-run additionally requires Supabase setup and
+approval for persistent collection. All existing pacing, request/chart caps, secrets,
+logging, timeout, and concurrency settings apply to both execution modes.
+
+Disabled scheduled runs produce no-op summaries. PDFs are neither committed nor uploaded
+as Actions artifacts. Runner files are ephemeral; persistent originals belong in private
+Supabase Storage.
 
 `tests.yml` runs on push/PR/manual invocation for Python 3.12/3.13, without secrets and with
 scraping disabled. It runs pytest, Ruff, and actionlint. YAML and actionlint validation
