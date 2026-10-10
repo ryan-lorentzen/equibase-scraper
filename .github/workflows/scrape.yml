@@ -1,0 +1,81 @@
+name: Collect race charts
+
+"on":
+  schedule:
+    - cron: "17 6,18 * * *"
+      timezone: "America/New_York"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Discover only (requires SCRAPER_ENABLED=true for network access)
+        type: boolean
+        default: true
+      track:
+        description: Track code (blank = all current index tracks)
+        type: string
+      date:
+        description: Single card date YYYY-MM-DD (requires track)
+        type: string
+      race:
+        description: Single race number (requires track and date)
+        type: string
+      listing_url:
+        description: Explicit published listing URL (requires track and date)
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: equibase-chart-collection
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+      STORAGE_BUCKET: ${{ vars.STORAGE_BUCKET || 'race-charts' }}
+      SCRAPER_ENABLED: ${{ vars.SCRAPER_ENABLED || 'false' }}
+      LOOKBACK_DAYS: ${{ vars.LOOKBACK_DAYS || '7' }}
+      LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
+      REQUEST_DELAY_SECONDS: ${{ vars.REQUEST_DELAY_SECONDS || '2' }}
+      REQUEST_TIMEOUT_SECONDS: ${{ vars.REQUEST_TIMEOUT_SECONDS || '30' }}
+      MAX_RETRIES: ${{ vars.MAX_RETRIES || '3' }}
+      MAX_CHARTS_PER_RUN: ${{ vars.MAX_CHARTS_PER_RUN || '25' }}
+      MAX_REQUESTS_PER_RUN: ${{ vars.MAX_REQUESTS_PER_RUN || '150' }}
+      MAX_RETRY_WAIT_SECONDS: ${{ vars.MAX_RETRY_WAIT_SECONDS || '300' }}
+      MAX_PDF_BYTES: ${{ vars.MAX_PDF_BYTES || '20000000' }}
+      USER_AGENT: ${{ vars.USER_AGENT || 'equibase-scraper/0.1.0 (+https://github.com/ryan-lorentzen/equibase-scraper)' }}
+      CHART_INDEX_URL: ${{ vars.CHART_INDEX_URL || 'https://tvg.equibase.com/static/chart/pdf/' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install .
+      - name: Run conservative collection
+        env:
+          INPUT_TRACK: ${{ inputs.track }}
+          INPUT_DATE: ${{ inputs.date }}
+          INPUT_RACE: ${{ inputs.race }}
+          INPUT_LISTING_URL: ${{ inputs.listing_url }}
+          INPUT_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
+        shell: bash
+        run: |
+          args=()
+          if [[ -n "$INPUT_TRACK" ]]; then args+=(--track "$INPUT_TRACK"); fi
+          if [[ -n "$INPUT_DATE" ]]; then args+=(--date "$INPUT_DATE"); fi
+          if [[ -n "$INPUT_RACE" ]]; then args+=(--race "$INPUT_RACE"); fi
+          if [[ -n "$INPUT_LISTING_URL" ]]; then args+=(--listing-url "$INPUT_LISTING_URL"); fi
+          if [[ "$INPUT_DRY_RUN" == "true" ]]; then args+=(--dry-run); fi
+          python -m equibase_scraper.main "${args[@]}"
+      - name: Action summary
+        if: always()
+        shell: bash
+        run: |
+          printf '## Equibase scraper\n\nJob status: %s\n\nSCRAPER_ENABLED: `%s`\n\nSee the run logs for counters and failed source URLs.\n' \
+            '${{ job.status }}' "$SCRAPER_ENABLED" >> "$GITHUB_STEP_SUMMARY"
