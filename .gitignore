@@ -218,3 +218,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project credentials and collected data
+.env.*
+!.env.example
+/data/
+*.pdf
+*.dump
+*.sql.gz
